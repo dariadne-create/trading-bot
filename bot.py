@@ -143,8 +143,8 @@ for ticker in tickers:
         if weekly_bear and stoch_cross and cci_cross:
             signals.append(f"🟣 REBOTE BAJISTA: {ticker}")
 
-    except:
-        continue
+    except Exception as e:
+        print(f"Error en {ticker}: {e}")
 
 # ==============================
 # 📩 RESULTADO
