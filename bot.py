@@ -10,22 +10,29 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
 # ==============================
-# 📊 SP500 BASE (estable)
+# 📊 SP500 REAL (sin bloqueo)
 # ==============================
-sp500 = [
-"AAPL","MSFT","NVDA","AMZN","META","GOOGL","GOOG","BRK-B","LLY","AVGO",
-"TSLA","JPM","UNH","V","XOM","MA","PG","COST","JNJ","HD",
-"ABBV","BAC","KO","CRM","ORCL","MRK","CVX","ADBE","PEP","TMO",
-"CSCO","WMT","ACN","MCD","ABT","LIN","DHR","INTU","QCOM","AMD",
-"TXN","AMAT","NEE","PM","UNP","RTX","LOW","HON","IBM","INTC",
-"GS","CAT","SPGI","AXP","GE","NOW","ISRG","PLD","BKNG","SYK"
-]
+def get_sp500():
+    try:
+        url = "https://datahub.io/core/s-and-p-500-companies/r/constituents.csv"
+        df = pd.read_csv(url)
+        symbols = df["Symbol"].tolist()
+
+        # Ajuste formato Yahoo
+        symbols = [s.replace(".", "-") for s in symbols]
+
+        print(f"SP500 cargado: {len(symbols)} activos")
+        return symbols
+
+    except Exception as e:
+        print("Error cargando SP500:", e)
+        return []
 
 # ==============================
 # 📂 TUS ACTIVOS
 # ==============================
 raw_assets = """
-AQUI PEGA TUS LISTAS COMPLETAS
+PEGA AQUI TODAS TUS LISTAS COMPLETAS
 """
 
 # ==============================
@@ -48,8 +55,6 @@ def clean_tickers(raw):
         tickers.add(symbol)
 
     return list(tickers)
-
-tickers = list(set(sp500 + clean_tickers(raw_assets)))
 
 # ==============================
 # 📩 TELEGRAM
@@ -120,9 +125,13 @@ def CCI(df):
 # ==============================
 # 🚀 LOOP PRINCIPAL
 # ==============================
+tickers = list(set(get_sp500() + clean_tickers(raw_assets)))
+
 signals = []
 
-for ticker in tickers:
+for i, ticker in enumerate(tickers):
+    print(f"{i+1}/{len(tickers)} - {ticker}")
+
     try:
         df_d = yf.download(ticker, period="6mo", interval="1d", progress=False)
         df_w = yf.download(ticker, period="1y", interval="1wk", progress=False)
@@ -130,7 +139,6 @@ for ticker in tickers:
         if len(df_d) < 60 or len(df_w) < 20:
             continue
 
-        # Limpiar NaN
         df_d = df_d.dropna()
         df_w = df_w.dropna()
 
@@ -143,7 +151,7 @@ for ticker in tickers:
         weekly_bull = df_w["EMA10"].iloc[-1] > df_w["EMA55"].iloc[-1]
         weekly_bear = df_w["EMA55"].iloc[-1] > df_w["EMA10"].iloc[-1]
 
-        # DMI diario
+        # DMI
         di_plus, di_minus = DMI(df_d)
 
         if pd.isna(di_plus.iloc[-1]) or pd.isna(di_minus.iloc[-1]):
@@ -151,30 +159,24 @@ for ticker in tickers:
 
         di_ok = di_plus.iloc[-1] > di_minus.iloc[-1]
 
-        # ==========================
         # 🟢 BASE LONG
-        # ==========================
         cross_up = (
             df_d["EMA10"].iloc[-2] < df_d["EMA55"].iloc[-2] and
             df_d["EMA10"].iloc[-1] > df_d["EMA55"].iloc[-1]
         )
 
         if weekly_bull and cross_up and di_ok:
-            signals.append(f"🟢 BASE LONG: {ticker}")
+            signals.append(f"{ticker}")
 
-        # ==========================
         # 🔵 REBOTE ALCISTA
-        # ==========================
         trend = df_d["EMA10"].iloc[-1] > df_d["EMA55"].iloc[-1]
         pullback = df_d["Close"].iloc[-2] < df_d["EMA10"].iloc[-2]
         reclaim = df_d["Close"].iloc[-1] > df_d["EMA10"].iloc[-1]
 
         if weekly_bull and trend and pullback and reclaim and di_ok:
-            signals.append(f"🔵 REBOTE LONG: {ticker}")
+            signals.append(f"{ticker}")
 
-        # ==========================
         # 🟣 REBOTE BAJISTA
-        # ==========================
         k, d = STOCH_RSI(df_w)
         cci = CCI(df_w)
         cci_ma = cci.rolling(20).mean()
@@ -186,15 +188,31 @@ for ticker in tickers:
         cci_cross = cci.iloc[-2] < cci_ma.iloc[-2] and cci.iloc[-1] > cci_ma.iloc[-1]
 
         if weekly_bear and stoch_cross and cci_cross:
-            signals.append(f"🟣 REBOTE BAJISTA: {ticker}")
+            signals.append(f"{ticker}")
 
     except Exception as e:
         print(f"Error en {ticker}: {e}")
 
 # ==============================
-# 📩 RESULTADO
+# 📩 FORMATO PRO
 # ==============================
-if signals:
-    send_telegram("\n".join(signals))
-else:
-    send_telegram("Sin señales hoy")
+MAX = 5
+
+base = []
+rebote = []
+bajista = []
+
+for s in signals:
+    if s not in base and s not in rebote and s not in bajista:
+        base.append(s)
+
+mensaje = "📊 SEÑALES DEL DÍA\n\n"
+
+if base:
+    mensaje += "🟢 ACTIVOS DETECTADOS\n"
+    mensaje += "\n".join(base[:MAX]) + "\n\n"
+
+if not signals:
+    mensaje = "Sin señales hoy"
+
+send_telegram(mensaje)
